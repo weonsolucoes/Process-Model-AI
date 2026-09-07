@@ -1,0 +1,113 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id           String    @id @default(cuid())
+  email        String    @unique
+  passwordHash String
+  createdAt    DateTime  @default(now())
+  processes    Process[]
+}
+
+enum ProcessStatus {
+  INTERVIEW
+  VALIDATION
+  AUDITED
+  COMPLETED
+}
+
+model Process {
+  id                  String        @id @default(cuid())
+  userId              String
+  user                User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  name                String
+  area                String?
+  respondentRole      String?
+  initialDescription  String?
+  status              ProcessStatus @default(INTERVIEW)
+  // The Process Model (see src/domain/processModel.ts) is the single source
+  // of truth for everything the interview has learned. Stored as JSON text
+  // because SQLite has no native JSON type; Prisma's Json field handles the
+  // (de)serialization transparently and the same schema works unchanged if
+  // this ever moves to Postgres.
+  modelJson           Json
+  lastAuditJson        Json?
+  createdAt           DateTime      @default(now())
+  updatedAt           DateTime      @updatedAt
+
+  messages            Message[]
+  interactions        AIInteractionLog[]
+  outputs             Output[]
+
+  @@index([userId])
+}
+
+enum MessageRole {
+  USER
+  ASSISTANT
+  SYSTEM
+}
+
+model Message {
+  id        String      @id @default(cuid())
+  processId String
+  process   Process     @relation(fields: [processId], references: [id], onDelete: Cascade)
+  role      MessageRole
+  content   String
+  createdAt DateTime    @default(now())
+
+  @@index([processId])
+}
+
+enum InteractionKind {
+  EXTRACTION
+  AUDIT
+  OUTPUT
+}
+
+model AIInteractionLog {
+  id               String           @id @default(cuid())
+  processId        String
+  process          Process          @relation(fields: [processId], references: [id], onDelete: Cascade)
+  kind             InteractionKind
+  model            String
+  promptTokens     Int              @default(0)
+  completionTokens Int              @default(0)
+  costEstimateUsd  Float            @default(0)
+  decisionSummary  String?
+  errorMessage     String?
+  createdAt        DateTime         @default(now())
+
+  @@index([processId])
+}
+
+enum OutputType {
+  AS_IS
+  FLOWCHART
+  DIAGNOSIS
+  QUICK_WINS
+}
+
+enum OutputFormat {
+  HTML
+  MERMAID
+  PDF
+}
+
+model Output {
+  id        String       @id @default(cuid())
+  processId String
+  process   Process      @relation(fields: [processId], references: [id], onDelete: Cascade)
+  type      OutputType
+  format    OutputFormat
+  content   String
+  createdAt DateTime     @default(now())
+
+  @@index([processId])
+}
