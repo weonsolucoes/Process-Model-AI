@@ -15,14 +15,16 @@ export interface CompletenessCheck {
 export function checkEssentialCompleteness(model: ProcessModel): CompletenessCheck {
   const missing: string[] = [];
 
+  // Order matches spec §10's own priority: gatilho → fluxo principal →
+  // responsáveis → decisões relevantes/caminhos → encerramento. `missing[0]`
+  // drives which question gets asked next, so this order is not cosmetic —
+  // checking encerramento before responsáveis previously caused answers
+  // about one topic to be recorded under the other.
   if (!model.trigger || model.trigger.trim().length === 0) {
     missing.push("gatilho/início");
   }
   if (model.steps.length === 0) {
     missing.push("fluxo principal");
-  }
-  if (!model.endEvent || model.endEvent.trim().length === 0) {
-    missing.push("encerramento/fim");
   }
   if (model.steps.length > 1 && !model.steps.some((s) => s.responsible)) {
     missing.push("responsáveis");
@@ -31,6 +33,9 @@ export function checkEssentialCompleteness(model: ProcessModel): CompletenessChe
     if (decision.paths.length < 2) {
       missing.push(`caminhos da decisão "${decision.condition}"`);
     }
+  }
+  if (!model.endEvent || model.endEvent.trim().length === 0) {
+    missing.push("encerramento/fim");
   }
 
   return { complete: missing.length === 0, missing };

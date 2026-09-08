@@ -1,5 +1,5 @@
 import type { Contradiction, ProcessModel } from "@/domain/processModel";
-import type { ExtractionUpdate } from "@/domain/interviewTypes";
+import type { ExtractionUpdate, NewValidationPointInput } from "@/domain/interviewTypes";
 
 const TOP_LEVEL_FIELDS = ["objective", "owner", "trigger", "endEvent"] as const;
 type TopLevelField = (typeof TOP_LEVEL_FIELDS)[number];
@@ -28,6 +28,34 @@ export function stripContradictedFields(
     }
   }
   return { ...update, topLevel };
+}
+
+/**
+ * Only `objective/owner/trigger/endEvent` can actually be confirmed and
+ * written back by `resolveNextContradiction` below. Asking the user to
+ * confirm a contradiction the system has no way to apply would be a
+ * dead end — the confirmation prompt would be shown, but the answer
+ * would silently have no effect. Splitting here lets the engine turn an
+ * unsupported contradiction into a visible `validationPoint` instead of a
+ * blocking question that goes nowhere.
+ */
+export function partitionContradictions(contradictions: Contradiction[]): {
+  supported: Contradiction[];
+  unsupported: Contradiction[];
+} {
+  const supported: Contradiction[] = [];
+  const unsupported: Contradiction[] = [];
+  for (const c of contradictions) {
+    (isTopLevelField(c.field) ? supported : unsupported).push(c);
+  }
+  return { supported, unsupported };
+}
+
+export function contradictionToValidationPoint(c: Contradiction): NewValidationPointInput {
+  return {
+    field: c.field,
+    description: `Possível contradição não confirmada automaticamente: antes foi dito "${c.existingValue}", depois "${c.newValue}". ${c.explanation}`,
+  };
 }
 
 export function formatContradictionPrompt(contradictions: Contradiction[]): string {

@@ -47,7 +47,13 @@ export function mergeExtractionUpdate(model: ProcessModel, update: ExtractionUpd
 
   for (const d of update.addDecisions) {
     const id = nextId("decision");
-    const afterStep = next.steps[next.steps.length - 1];
+    // Prefer the step the AI actually named as the anchor; only fall back
+    // to "whatever is last in the model" when no hint was given or it
+    // didn't resolve to a known step — never a hard failure either way.
+    const hintedStepId = d.afterStepActivityHint ? findStepIdByActivity(next, d.afterStepActivityHint) : null;
+    const afterStep =
+      (hintedStepId ? next.steps.find((s) => s.id === hintedStepId) : undefined) ??
+      next.steps[next.steps.length - 1];
     const paths = d.paths.map((p) => ({
       label: p.label,
       description: p.description ?? null,

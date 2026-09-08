@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { runInterviewTurn } from "@/lib/interview/engine";
+import { HeuristicProvider } from "@/lib/ai/heuristicProvider";
+import type { ConversationTurn } from "@/lib/ai/provider";
 import { FixtureProvider, turn } from "../support/fixtureProvider";
 import { makeEmptyModel } from "../support/factories";
 
@@ -214,5 +216,79 @@ describe("unnecessary-questions guard (spec §45)", () => {
     // The engine's own next call for this process must be a fresh AI turn
     // (finished, not another forced fallback question) — the sole assertion
     // that actually matters here is that nothing kept the interview open.
+  });
+});
+
+describe("regression: completeness priority order (spec §10)", () => {
+  it("does not swap a responsibility answer into endEvent or an ending answer into responsible, against the real HeuristicProvider", async () => {
+    // Reproduces, turn for turn, the purchasing-process audit simulation
+    // that exposed the bug: before the fix, the deterministic floor asked
+    // about "encerramento/fim" before "responsáveis", so the user's answer
+    // about who is responsible got recorded as the end event, and the
+    // answer about the end event got smeared across every step's
+    // `responsible` field instead.
+    const provider = new HeuristicProvider();
+    let model = makeEmptyModel();
+    let history: ConversationTurn[] = [];
+
+    const turns = [
+      "O estoque é verificado visualmente uma ou duas vezes por semana. Produtos com estoque baixo são identificados.",
+      "O comprador informa o gerente. O gerente decide produtos e quantidades. A compra é feita presencialmente.",
+      "O comprador é responsável pela verificação e pela compra. O gerente é responsável pela decisão.",
+      "O processo termina quando os produtos são colocados na prateleira.",
+    ];
+
+    let last;
+    for (const message of turns) {
+      last = await runInterviewTurn(model, history, message, provider);
+      history = [...history, { role: "user", content: message }, { role: "assistant", content: last.assistantMessage }];
+      model = last.model;
+      if (last.interviewComplete) break;
+    }
+
+    expect(last!.interviewComplete).toBe(true);
+    expect(model.endEvent).toContain("prateleira");
+    expect(model.endEvent).not.toContain("responsável");
+    for (const step of model.steps) {
+      expect(step.responsible).not.toContain("termina quando");
+    }
+  });
+});
+
+describe("regression: unsupported contradictions become a validationPoint (spec §17)", () => {
+  it("does not block the turn on a contradiction the system can't apply, and records it as a validationPoint instead", async () => {
+    const model = makeEmptyModel();
+    model.trigger = "Estoque baixo";
+    model.endEvent = "Pedido recebido";
+    model.steps = [
+      { id: "s1", activity: "Verificar preço", responsible: "Ana", input: null, output: null, systemTool: null, order: 0, nextStepId: null, decisionId: null },
+    ];
+
+    const provider = new FixtureProvider([
+      turn({
+        decision: "finish",
+        contradictions: [
+          {
+            field: "step.responsible",
+            existingValue: "Ana",
+            newValue: "Carlos",
+            explanation: "o responsável pela etapa mudou",
+          },
+        ],
+      }),
+    ]);
+
+    const outcome = await runInterviewTurn(model, [], "Na verdade quem verifica o preço é o Carlos.", provider);
+
+    // Not blocked: no pending confirmation left dangling for a field the
+    // system has no way to write back.
+    expect(outcome.model.pendingContradictions).toHaveLength(0);
+    // Visible instead as a validation point, not silently dropped.
+    expect(outcome.model.validationPoints).toHaveLength(1);
+    expect(outcome.model.validationPoints[0]?.field).toBe("step.responsible");
+    expect(outcome.model.validationPoints[0]?.description).toContain("Ana");
+    expect(outcome.model.validationPoints[0]?.description).toContain("Carlos");
+    // The original (unconfirmed) value is left untouched — never overwritten silently.
+    expect(outcome.model.steps[0]?.responsible).toBe("Ana");
   });
 });

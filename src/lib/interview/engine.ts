@@ -1,7 +1,13 @@
 import type { Identification, ProcessModel } from "@/domain/processModel";
 import type { AIProvider, AIUsage, ConversationTurn } from "@/lib/ai/provider";
 import { checkEssentialCompleteness, defaultQuestionForGap } from "./completeness";
-import { formatContradictionPrompt, resolveNextContradiction, stripContradictedFields } from "./contradictions";
+import {
+  contradictionToValidationPoint,
+  formatContradictionPrompt,
+  partitionContradictions,
+  resolveNextContradiction,
+  stripContradictedFields,
+} from "./contradictions";
 import { mergeExtractionUpdate } from "./merge";
 
 export interface EngineTurnResult {
@@ -43,21 +49,36 @@ export async function runInterviewTurn(
   });
   const { result, usage, model: aiModel } = response;
 
-  const cleanUpdate = stripContradictedFields(result.update, result.contradictions);
+  // Only objective/owner/trigger/endEvent can actually be confirmed and
+  // written back (see resolveNextContradiction). A contradiction on any
+  // other field would otherwise show a confirmation question whose answer
+  // the system has no way to apply — instead it becomes a validationPoint,
+  // visible on the validation screen, without blocking the turn.
+  const { supported: supportedContradictions, unsupported: unsupportedContradictions } =
+    partitionContradictions(result.contradictions);
+
+  const stripped = stripContradictedFields(result.update, supportedContradictions);
+  const cleanUpdate = {
+    ...stripped,
+    addValidationPoints: [
+      ...stripped.addValidationPoints,
+      ...unsupportedContradictions.map(contradictionToValidationPoint),
+    ],
+  };
   let merged = mergeExtractionUpdate(model, cleanUpdate);
 
-  if (result.contradictions.length > 0) {
+  if (supportedContradictions.length > 0) {
     merged = {
       ...merged,
-      pendingContradictions: [...merged.pendingContradictions, ...result.contradictions],
+      pendingContradictions: [...merged.pendingContradictions, ...supportedContradictions],
     };
     return {
       model: merged,
-      assistantMessage: formatContradictionPrompt(result.contradictions),
+      assistantMessage: formatContradictionPrompt(supportedContradictions),
       interviewComplete: false,
       usage,
       aiModel,
-      decisionSummary: `Contradição detectada em: ${result.contradictions.map((c) => c.field).join(", ")}.`,
+      decisionSummary: `Contradição detectada em: ${supportedContradictions.map((c) => c.field).join(", ")}.`,
     };
   }
 

@@ -133,6 +133,59 @@ describe("mergeExtractionUpdate — anti-hallucination boundary (spec §44)", ()
     expect(merged.steps[1]?.decisionId).toBe(decision?.id);
   });
 
+  it("regression: anchors a decision to the step named by afterStepActivityHint, not just the last step in the model", () => {
+    const model = makeEmptyModel();
+    const update = emptyUpdate();
+    // Three unrelated steps already exist; the decision that arrives now is
+    // about the FIRST one, described out of order — the previous behavior
+    // (always anchoring to `steps[steps.length - 1]`) would have wrongly
+    // attached this to "Colocar na prateleira".
+    update.addSteps.push(
+      { activity: "Verificar preço no site do fornecedor" },
+      { activity: "Fazer o pedido" },
+      { activity: "Colocar na prateleira" },
+    );
+    update.addDecisions.push({
+      condition: "Preço está dentro da faixa esperada?",
+      responsible: null,
+      afterStepActivityHint: "Verificar preço no site do fornecedor",
+      paths: [
+        { label: "Sim", description: null, nextStepActivityHint: null },
+        { label: "Não", description: null, nextStepActivityHint: null },
+      ],
+    });
+
+    const merged = mergeExtractionUpdate(model, update);
+    const verificarStep = merged.steps.find((s) => s.activity.startsWith("Verificar preço"));
+
+    expect(merged.decisions[0]?.afterStepId).toBe(verificarStep?.id);
+    expect(merged.decisions[0]?.afterStepId).not.toBe(merged.steps[2]?.id);
+  });
+
+  it("falls back to the last step when afterStepActivityHint is absent or does not resolve", () => {
+    const model = makeEmptyModel();
+    const update = emptyUpdate();
+    update.addSteps.push({ activity: "Verificar preço" }, { activity: "Fazer o pedido" });
+
+    update.addDecisions.push({
+      condition: "Sem hint algum",
+      responsible: null,
+      paths: [{ label: "Sim", description: null, nextStepActivityHint: null }],
+    });
+    update.addDecisions.push({
+      condition: "Hint que não bate com nada",
+      responsible: null,
+      afterStepActivityHint: "Etapa que não existe em lugar nenhum",
+      paths: [{ label: "Sim", description: null, nextStepActivityHint: null }],
+    });
+
+    const merged = mergeExtractionUpdate(model, update);
+    const lastStepId = merged.steps[1]?.id;
+
+    expect(merged.decisions[0]?.afterStepId).toBe(lastStepId);
+    expect(merged.decisions[1]?.afterStepId).toBe(lastStepId);
+  });
+
   it("leaves an unresolved decision path link as null rather than guessing a target (spec §18)", () => {
     const model = makeEmptyModel();
     const update = emptyUpdate();

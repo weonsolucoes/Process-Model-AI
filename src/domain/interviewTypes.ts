@@ -52,6 +52,8 @@ export const NewDecisionPathInputSchema = z.object({
 export const NewDecisionInputSchema = z.object({
   condition: z.string().min(1),
   responsible: z.string().nullable().optional(),
+  /** Free-text hint matched against step activities to anchor the decision to the step it actually follows, instead of defaulting to whichever step happens to be last in the model. */
+  afterStepActivityHint: z.string().nullable().optional(),
   paths: z.array(NewDecisionPathInputSchema).default([]),
 });
 export type NewDecisionInput = z.infer<typeof NewDecisionInputSchema>;
